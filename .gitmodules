@@ -1,0 +1,9 @@
+[submodule "apps/api"]
+	path = apps/api
+	url = https://github.com/ebrudavutoglu/erp-api.git
+[submodule "apps/worker"]
+	path = apps/worker
+	url = https://github.com/ebrudavutoglu/erp-worker.git
+[submodule "apps/web"]
+	path = apps/web
+	url = https://github.com/ebrudavutoglu/erp-web.git
