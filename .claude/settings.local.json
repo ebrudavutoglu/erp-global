@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker-compose up -d api --build)",
+      "Bash(docker-compose logs api)"
+    ]
+  }
+}

@@ -1,0 +1,859 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING_VERIFICATION
+}
+
+enum WorkspaceMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+  GUEST
+}
+
+enum FieldType {
+  TEXT
+  LONG_TEXT
+  NUMBER
+  PRICE
+  CURRENCY
+  PERCENT
+  BOOLEAN
+  DATE
+  DATETIME
+  TIME
+  SELECT
+  MULTI_SELECT
+  RELATION
+  USER
+  FILE
+  URL
+  EMAIL
+  PHONE
+  FORMULA
+  STATUS
+  RATING
+  AUTO_NUMBER
+  CREATED_AT
+  UPDATED_AT
+  CREATED_BY
+  UPDATED_BY
+  JSON
+}
+
+enum ViewType {
+  TABLE
+  KANBAN
+  CALENDAR
+  TIMELINE
+  GALLERY
+  LIST
+  CHART
+}
+
+enum AutomationTriggerType {
+  RECORD_CREATED
+  RECORD_UPDATED
+  RECORD_DELETED
+  FIELD_VALUE_CHANGED
+  SCHEDULE
+  WEBHOOK
+  MANUAL
+}
+
+enum AutomationActionType {
+  CREATE_RECORD
+  UPDATE_RECORD
+  DELETE_RECORD
+  SEND_EMAIL
+  SEND_NOTIFICATION
+  CALL_WEBHOOK
+  CREATE_RELATION
+  RUN_FORMULA
+  WAIT
+}
+
+enum AutomationStatus {
+  ACTIVE
+  INACTIVE
+  DRAFT
+}
+
+enum AutomationRunStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  WEBHOOK
+  MOBILE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  TRIALING
+  PAUSED
+}
+
+enum PermissionAction {
+  READ
+  CREATE
+  UPDATE
+  DELETE
+  MANAGE
+}
+
+enum PermissionResource {
+  WORKSPACE
+  DATABASE
+  VIEW
+  RECORD
+  FIELD
+  AUTOMATION
+  DASHBOARD
+  FILE
+}
+
+// ============================================================
+// AUTH & USERS
+// ============================================================
+
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  passwordHash      String?
+  firstName         String
+  lastName          String
+  avatarUrl         String?
+  status            UserStatus @default(PENDING_VERIFICATION)
+  emailVerifiedAt   DateTime?
+  twoFactorEnabled  Boolean   @default(false)
+  twoFactorSecret   String?
+  language          String    @default("en")
+  locale            String    @default("en")
+  timezone          String    @default("UTC")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  sessions              Session[]
+  workspaceMembers      WorkspaceMember[]
+  ownedWorkspaces       Workspace[]           @relation("WorkspaceOwner")
+  notificationSettings  NotificationSetting[]
+  notifications         Notification[]
+  auditLogs             AuditLog[]            @relation("AuditLogUser")
+  oauthAccounts         OAuthAccount[]
+  apiTokens             ApiToken[]
+  createdRecords        Record[]              @relation("RecordCreatedBy")
+  updatedRecords        Record[]              @relation("RecordUpdatedBy")
+  files                 File[]
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  refreshToken String   @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model OAuthAccount {
+  id             String   @id @default(cuid())
+  userId         String
+  provider       String   // google, github, microsoft
+  providerUserId String
+  accessToken    String?
+  refreshToken   String?
+  expiresAt      DateTime?
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+}
+
+// ============================================================
+// WORKSPACE
+// ============================================================
+
+model Workspace {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  logoUrl     String?
+  ownerId     String
+  plan        String   @default("free")
+  languages   String[] @default(["en", "tr"])
+  settings    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner         User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members       WorkspaceMember[]
+  databases     Database[]
+  dashboards    Dashboard[]
+  automations   Automation[]
+  notifications Notification[]
+  webhooks      Webhook[]
+  apiTokens     ApiToken[]
+  subscription  Subscription?
+  auditLogs     AuditLog[]
+  files         File[]
+  fileFolders   FileFolder[]
+  integrations  IntegrationConnection[]
+}
+
+model WorkspaceMember {
+  id          String              @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceMemberRole @default(MEMBER)
+  invitedBy   String?
+  joinedAt    DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permissions ResourcePermission[]
+
+  @@unique([workspaceId, userId])
+}
+
+model WorkspaceInvitation {
+  id          String   @id @default(cuid())
+  workspaceId String
+  email       String
+  role        WorkspaceMemberRole @default(MEMBER)
+  token       String   @unique
+  invitedBy   String
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  @@unique([workspaceId, email])
+}
+
+// ============================================================
+// PERMISSION ENGINE
+// ============================================================
+
+model Role {
+  id          String   @id @default(cuid())
+  workspaceId String?  // null = system role
+  name        String
+  description String?
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  permissions RolePermission[]
+}
+
+model RolePermission {
+  id       String           @id @default(cuid())
+  roleId   String
+  action   PermissionAction
+  resource PermissionResource
+  scope    Json?            // e.g. { databaseId: "xxx" }
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+}
+
+model ResourcePermission {
+  id                String              @id @default(cuid())
+  workspaceMemberId String
+  resource          PermissionResource
+  resourceId        String
+  action            PermissionAction
+  granted           Boolean             @default(true)
+  createdAt         DateTime            @default(now())
+
+  member WorkspaceMember @relation(fields: [workspaceMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceMemberId, resource, resourceId, action])
+}
+
+// ============================================================
+// DYNAMIC DATABASE ENGINE
+// ============================================================
+
+model Database {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  slug        String
+  description String?
+  icon        String?
+  color       String?
+  settings    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fields      Field[]
+  records     Record[]
+  views       View[]
+  automations Automation[] @relation("AutomationDatabase")
+
+  @@unique([workspaceId, slug])
+  @@index([workspaceId])
+}
+
+model Field {
+  id           String    @id @default(cuid())
+  databaseId   String
+  name         String
+  slug         String
+  type         FieldType
+  description  String?
+  required     Boolean   @default(false)
+  unique       Boolean   @default(false)
+  primary      Boolean   @default(false)
+  order        Int       @default(0)
+  defaultValue Json?
+  settings     Json      @default("{}")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  database        Database          @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+  viewFields      ViewField[]
+  filterConditions FilterCondition[]
+
+  @@unique([databaseId, slug])
+  @@index([databaseId])
+}
+
+model Record {
+  id          String   @id @default(cuid())
+  databaseId  String
+  values      Json     @default("{}")
+  position    Float    @default(0)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  database    Database @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+  createdBy   User?    @relation("RecordCreatedBy", fields: [createdById], references: [id])
+  updatedBy   User?    @relation("RecordUpdatedBy", fields: [updatedById], references: [id])
+
+  relationsFrom RecordRelation[] @relation("RelationSource")
+  relationsTo   RecordRelation[] @relation("RelationTarget")
+
+  activities    Activity[]
+  notifications Notification[] @relation("NotificationRecord")
+
+  @@index([databaseId])
+  @@index([createdAt])
+}
+
+model RecordRelation {
+  id            String   @id @default(cuid())
+  sourceId      String
+  targetId      String
+  fieldId       String   // the relation field on source
+  createdAt     DateTime @default(now())
+
+  source Record @relation("RelationSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  target Record @relation("RelationTarget", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, targetId, fieldId])
+  @@index([sourceId])
+  @@index([targetId])
+}
+
+// ============================================================
+// VIEW ENGINE
+// ============================================================
+
+model View {
+  id         String   @id @default(cuid())
+  databaseId String
+  name       String
+  type       ViewType @default(TABLE)
+  order      Int      @default(0)
+  config     Json     @default("{}")
+  isLocked   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  database     Database          @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+  fields       ViewField[]
+  filterGroups FilterGroup[]
+  sorts        ViewSort[]
+  groupBys     ViewGroupBy[]
+
+  @@index([databaseId])
+}
+
+model ViewField {
+  id         String   @id @default(cuid())
+  viewId     String
+  fieldId    String
+  visible    Boolean  @default(true)
+  order      Int      @default(0)
+  width      Int?
+  frozen     Boolean  @default(false)
+
+  view  View  @relation(fields: [viewId], references: [id], onDelete: Cascade)
+  field Field @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  @@unique([viewId, fieldId])
+}
+
+model FilterGroup {
+  id         String @id @default(cuid())
+  viewId     String
+  parentId   String?
+  operator   String @default("AND")
+  order      Int    @default(0)
+
+  view      View            @relation(fields: [viewId], references: [id], onDelete: Cascade)
+  parent    FilterGroup?    @relation("FilterGroupNested", fields: [parentId], references: [id])
+  children  FilterGroup[]   @relation("FilterGroupNested")
+  conditions FilterCondition[]
+
+  @@index([viewId])
+}
+
+model FilterCondition {
+  id          String @id @default(cuid())
+  groupId     String
+  fieldId     String
+  operator    String
+  value       Json?
+  order       Int    @default(0)
+
+  group FilterGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  field Field       @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+}
+
+model ViewSort {
+  id        String  @id @default(cuid())
+  viewId    String
+  fieldId   String
+  direction String  @default("asc")
+  order     Int     @default(0)
+
+  view View @relation(fields: [viewId], references: [id], onDelete: Cascade)
+}
+
+model ViewGroupBy {
+  id        String  @id @default(cuid())
+  viewId    String
+  fieldId   String
+  order     Int     @default(0)
+  collapsed Json    @default("[]")
+
+  view View @relation(fields: [viewId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================
+// AUTOMATION ENGINE
+// ============================================================
+
+model Automation {
+  id          String           @id @default(cuid())
+  workspaceId String
+  databaseId  String?
+  name        String
+  description String?
+  status      AutomationStatus @default(DRAFT)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  workspace  Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  database   Database?             @relation("AutomationDatabase", fields: [databaseId], references: [id])
+  trigger    AutomationTrigger?
+  conditions AutomationCondition[]
+  actions    AutomationAction[]
+  runs       AutomationRun[]
+
+  @@index([workspaceId])
+  @@index([databaseId])
+}
+
+model AutomationTrigger {
+  id           String                @id @default(cuid())
+  automationId String                @unique
+  type         AutomationTriggerType
+  config       Json                  @default("{}")
+
+  automation Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+}
+
+model AutomationCondition {
+  id           String @id @default(cuid())
+  automationId String
+  fieldId      String?
+  operator     String
+  value        Json?
+  logicalOp    String  @default("AND")
+  order        Int     @default(0)
+
+  automation Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+}
+
+model AutomationAction {
+  id           String               @id @default(cuid())
+  automationId String
+  type         AutomationActionType
+  order        Int                  @default(0)
+  config       Json                 @default("{}")
+
+  automation Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+}
+
+model AutomationRun {
+  id           String              @id @default(cuid())
+  automationId String
+  status       AutomationRunStatus @default(PENDING)
+  triggerPayload Json?
+  result       Json?
+  error        String?
+  startedAt    DateTime            @default(now())
+  finishedAt   DateTime?
+
+  automation Automation @relation(fields: [automationId], references: [id])
+
+  @@index([automationId])
+}
+
+// ============================================================
+// DASHBOARD ENGINE
+// ============================================================
+
+model Dashboard {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  description String?
+  isPublic    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  widgets   DashboardWidget[]
+
+  @@index([workspaceId])
+}
+
+model DashboardWidget {
+  id          String   @id @default(cuid())
+  dashboardId String
+  type        String   // chart, metric, table, activity, calendar
+  title       String?
+  config      Json     @default("{}")
+  layout      Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  dashboard Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================
+// NOTIFICATION SYSTEM
+// ============================================================
+
+model Notification {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  type        String   // record_updated, mention, automation_failed, etc.
+  title       String
+  body        String?
+  data        Json?
+  recordId    String?
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  record     Record?   @relation("NotificationRecord", fields: [recordId], references: [id])
+  deliveries NotificationDelivery[]
+
+  @@index([userId, readAt])
+  @@index([workspaceId])
+}
+
+model NotificationDelivery {
+  id             String   @id @default(cuid())
+  notificationId String
+  channel        NotificationChannel
+  status         String   // pending, sent, failed
+  sentAt         DateTime?
+  error          String?
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+}
+
+model NotificationSetting {
+  id          String              @id @default(cuid())
+  userId      String
+  workspaceId String?
+  eventType   String
+  channel     NotificationChannel
+  enabled     Boolean             @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId, eventType, channel])
+}
+
+// ============================================================
+// FILE STORAGE
+// ============================================================
+
+model FileFolder {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  parentId    String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent    FileFolder? @relation("FolderTree", fields: [parentId], references: [id])
+  children  FileFolder[] @relation("FolderTree")
+  files     File[]
+
+  @@index([workspaceId])
+}
+
+model File {
+  id          String   @id @default(cuid())
+  workspaceId String
+  uploadedById String
+  folderId    String?
+  name        String
+  mimeType    String
+  size        BigInt
+  storageKey  String   @unique
+  url         String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  uploadedBy User        @relation(fields: [uploadedById], references: [id])
+  folder     FileFolder? @relation(fields: [folderId], references: [id])
+
+  @@index([workspaceId])
+}
+
+// ============================================================
+// BILLING & SAAS ENGINE
+// ============================================================
+
+model Plan {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  displayName String
+  description String?
+  price       Decimal  @db.Decimal(10, 2)
+  currency    String   @default("USD")
+  interval    String   @default("month")
+  stripePriceId String?
+  features    Json
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  workspaceId          String             @unique
+  planId               String
+  status               SubscriptionStatus @default(TRIALING)
+  stripeSubscriptionId String?
+  stripeCustomerId     String?
+  currentPeriodStart   DateTime
+  currentPeriodEnd     DateTime
+  cancelAtPeriodEnd    Boolean            @default(false)
+  trialEndsAt          DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan      Plan      @relation(fields: [planId], references: [id])
+  usage     SubscriptionUsage[]
+  invoices  Invoice[]
+
+  @@index([workspaceId])
+}
+
+model SubscriptionUsage {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  metric         String   // records, automations, api_calls, file_storage_gb
+  value          BigInt   @default(0)
+  periodStart    DateTime
+  periodEnd      DateTime
+  updatedAt      DateTime @updatedAt
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriptionId, metric, periodStart])
+}
+
+model Invoice {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  stripeInvoiceId String?
+  amount         Decimal  @db.Decimal(10, 2)
+  currency       String   @default("USD")
+  status         String   // paid, pending, failed
+  paidAt         DateTime?
+  dueDate        DateTime?
+  invoicePdfUrl  String?
+  createdAt      DateTime @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id])
+
+  @@index([subscriptionId])
+}
+
+// ============================================================
+// INTEGRATION PLATFORM
+// ============================================================
+
+model Integration {
+  id          String @id @default(cuid())
+  key         String @unique
+  name        String
+  description String?
+  logoUrl     String?
+  category    String
+  isActive    Boolean @default(true)
+  config      Json   @default("{}")
+}
+
+model IntegrationConnection {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  integrationId String
+  name          String?
+  credentials   Json
+  settings      Json     @default("{}")
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model Webhook {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  url         String
+  secret      String?
+  events      String[]
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([workspaceId])
+}
+
+model WebhookDelivery {
+  id          String   @id @default(cuid())
+  webhookId   String
+  event       String
+  payload     Json
+  response    Json?
+  statusCode  Int?
+  success     Boolean
+  deliveredAt DateTime @default(now())
+  retries     Int      @default(0)
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+}
+
+model ApiToken {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  name        String
+  token       String   @unique
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  scopes      String[]
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+// ============================================================
+// ACTIVITY & AUDIT LOG
+// ============================================================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String?
+  action      String   // create, update, delete, login, invite, etc.
+  resource    String   // user, workspace, database, record, field, etc.
+  resourceId  String?
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User?     @relation("AuditLogUser", fields: [userId], references: [id])
+
+  @@index([workspaceId, createdAt])
+  @@index([userId])
+  @@index([resource, resourceId])
+}
+
+model Activity {
+  id         String   @id @default(cuid())
+  recordId   String
+  userId     String?
+  type       String   // field_changed, comment_added, relation_added, etc.
+  data       Json?
+  createdAt  DateTime @default(now())
+
+  record Record @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  @@index([recordId, createdAt])
+}

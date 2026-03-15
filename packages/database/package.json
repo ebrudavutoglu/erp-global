@@ -1,0 +1,24 @@
+{
+  "name": "@repo/database",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prisma database schema and client",
+  "scripts": {
+    "build": "prisma generate",
+    "type-check": "echo 'No type checking needed for Prisma'",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:reset": "prisma migrate reset",
+    "prisma:seed": "node prisma/seed.js",
+    "prisma:studio": "prisma studio",
+    "prisma:format": "prisma format"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.7.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.7.0",
+    "typescript": "^5.3.0"
+  }
+}
