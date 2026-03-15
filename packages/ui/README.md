@@ -32,7 +32,14 @@ function MyForm() {
 ```
 
 #### FormSelect
-Select dropdown with predefined options.
+Searchable dropdown with predefined options. Built as a custom combobox (not native HTML select).
+
+**Features:**
+- Real-time search filtering
+- Clear selection button
+- Click-outside to close
+- Smooth animations
+- Configurable searchability
 
 ```tsx
 <FormSelect
@@ -41,10 +48,17 @@ Select dropdown with predefined options.
   options={[
     { value: "us", label: "United States" },
     { value: "uk", label: "United Kingdom" },
+    { value: "ca", label: "Canada" },
   ]}
+  searchable={true}      // Enable search (default: true)
   required
 />
 ```
+
+**Props:**
+- `searchable?`: boolean - Enable search functionality (default: true)
+- `placeholder?`: string - Placeholder text (default: "Select an option")
+- `disabled?`: boolean - Disable the select
 
 #### FormCheckbox
 Single checkbox input.
