@@ -50,8 +50,8 @@ export const FormInput = React.forwardRef<
             <input
               ref={ref}
               type={type}
-              {...field}
               {...props}
+              {...field}
               className={`w-full px-3 py-2 border rounded-md text-sm placeholder-gray-400 transition-colors
                 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
                 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed

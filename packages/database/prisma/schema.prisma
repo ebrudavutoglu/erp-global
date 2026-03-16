@@ -338,6 +338,7 @@ model Field {
   unique       Boolean   @default(false)
   primary      Boolean   @default(false)
   order        Int       @default(0)
+  isVisible    Boolean   @default(true)
   defaultValue Json?
   settings     Json      @default("{}")
   createdAt    DateTime  @default(now())
